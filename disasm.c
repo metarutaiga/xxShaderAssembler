@@ -10,7 +10,7 @@
 #define D3DSHADER_MASK D3DVS_VERSION(0, 0)
 
 //==============================================================================
-#define _PRINTF(format, ...) snprintf(buffer, size, "%s" format, buffer, __VA_ARGS__)
+#define _PRINTF(format, ...) snprintf(text, size, "%s" format, text, __VA_ARGS__)
 //------------------------------------------------------------------------------
 size_t TokenD3DSI(uint32_t tokens[8], uint32_t const* binary, size_t index, size_t count)
 {
@@ -37,12 +37,12 @@ size_t TokenD3DSI(uint32_t tokens[8], uint32_t const* binary, size_t index, size
     return 8;
 }
 //------------------------------------------------------------------------------
-size_t CommentD3DSI(char* buffer, size_t size, uint32_t const* binary, size_t index, size_t count)
+size_t CommentD3DSI(char* text, size_t size, uint32_t const* binary, size_t index, size_t count)
 {
     uint32_t token = binary[index];
     if ((token & D3DSI_OPCODE_MASK) == D3DSIO_COMMENT)
     {
-        if (buffer == NULL)
+        if (text == NULL)
             return ((token & D3DSI_COMMENTSIZE_MASK) >> D3DSI_COMMENTSIZE_SHIFT) + 1;
         if (count > index)
             count = count - index - 1;
@@ -52,16 +52,16 @@ size_t CommentD3DSI(char* buffer, size_t size, uint32_t const* binary, size_t in
             count = ((token & D3DSI_COMMENTSIZE_MASK) >> D3DSI_COMMENTSIZE_SHIFT) * 4;
         if (count > size)
             count = size;
-        memcpy(buffer, binary + index + 1, size);
+        memcpy(text, binary + index + 1, size);
         return size;
     }
     return 0;
 }
 //------------------------------------------------------------------------------
-void DisassembleD3DSI(char* buffer, size_t size, size_t width, uint32_t version, uint32_t const tokens[8], size_t count)
+void DisassembleD3DSI(char* text, size_t size, size_t width, uint32_t version, uint32_t const tokens[8], size_t count)
 {
     // Reset
-    buffer[0] = 0;
+    text[0] = 0;
 
     // Token
     size_t i = 0;
@@ -221,7 +221,7 @@ void DisassembleD3DSI(char* buffer, size_t size, size_t width, uint32_t version,
     // Declaration
     if ((token & D3DSI_OPCODE_MASK) == D3DSIO_DCL)
     {
-        switch (code[i] & D3DSP_DCL_USAGE_MASK)
+        switch (tokens[i] & D3DSP_DCL_USAGE_MASK)
         {
         case D3DDECLUSAGE_POSITION:     instruction = "dcl_position";       break;
         case D3DDECLUSAGE_BLENDWEIGHT:  instruction = "dcl_blendweight";    break;

@@ -2,7 +2,9 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef __clang__
@@ -22,7 +24,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include "d3d8.h"
+#include "d3d9.h"
+#define strtok_r strtok_s
 #else
 #include <stdint.h>
 #define FALSE false
@@ -36,18 +39,39 @@
 #define lstrlen strlen
 #define _snprintf snprintf
 #define _vsnprintf vsnprintf
+#define DEFINE_GUID(...)
 typedef bool BOOL;
 typedef float FLOAT;
+typedef int16_t SHORT;
 typedef int32_t HRESULT;
 typedef int32_t INT;
 typedef int32_t LONG;
 typedef uint8_t BYTE;
 typedef uint16_t WORD;
+typedef uint16_t USHORT;
 typedef uint32_t DWORD;
 typedef uint32_t UINT;
+typedef uint64_t UINT64;
+typedef uint64_t ULONGLONG;
 typedef char const* LPCSTR;
+typedef void* HANDLE;
 typedef void* HWND;
 typedef struct { char x[16]; } GUID;
+typedef struct { uint64_t v; } LARGE_INTEGER;
 #endif
-#include "d3d8types.h"
-#include "d3d8caps.h"
+#include "d3d9types.h"
+#include "d3d9caps.h"
+
+#if (DIRECT3D_VERSION >= 0x0900)
+#define D3DSIO_TEXM3x3DIFF (D3DSIO_TEXM3x3TEX + 1)
+#endif
+
+#if __cplusplus
+constexpr uint64_t operator ""_CC(char const* text, size_t length)
+{
+    uint64_t value = 0;
+    for (size_t i = 0; i < length; ++i)
+        value += uint64_t(uint8_t(text[i])) << (i % 8 * 8);
+    return value;
+};
+#endif

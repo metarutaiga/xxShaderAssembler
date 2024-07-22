@@ -1,0 +1,9 @@
+[submodule "microsoft"]
+	path = microsoft
+	url = https://github.com/metarutaiga/shval
+[submodule "nvidia/kelvin"]
+	path = nvidia/kelvin
+	url = https://github.com/metarutaiga/kelvin
+[submodule "ati/chaplin"]
+	path = ati/chaplin
+	url = https://github.com/metarutaiga/chaplin

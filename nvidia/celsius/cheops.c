@@ -14,6 +14,17 @@
 #define D3DSI_GETREGTYPE(token)     ((D3DSHADER_PARAM_REGISTER_TYPE)(((token & D3DSP_REGTYPE_MASK) >> D3DSP_REGTYPE_SHIFT) | ((token & D3DSP_REGTYPE_MASK2) >> D3DSP_REGTYPE_SHIFT2)))
 
 #define _PRINTF(format, ...) snprintf(text, size, "%s" format, text, __VA_ARGS__)
+#define _OPTIMIZE 1
+
+int (*PrintfCheops)(char const* format, ...) = printf;
+
+static void PackCheops(void* destination, void* source)
+{
+    uint32_t* left = (uint32_t*)source;
+    uint32_t* right = (uint32_t*)destination;
+    right[0] = left[1];
+    right[1] = left[0];
+}
 
 static void DefaultCheops(struct CheopsMicrocode* microcode)
 {
@@ -58,6 +69,8 @@ static void SourceRegisterCheopsFromD3DSI(struct CheopsMicrocode* microcode, uin
     microcode->alu = CHEOPS_CALU_PASB;
     switch (D3DVS_GETSWIZZLE(source))
     {
+    case D3DSP_NOSWIZZLE:
+        break;
     case D3DSP_REPLICATERED:
         microcode->alu = CHEOPS_CALU_SMRB0;
         break;
@@ -69,6 +82,9 @@ static void SourceRegisterCheopsFromD3DSI(struct CheopsMicrocode* microcode, uin
         break;
     case D3DSP_REPLICATEALPHA:
         microcode->alu = CHEOPS_CALU_SMRB3;
+        break;
+    default:
+        PrintfCheops("Unknown swizzle mask (%08x)\n", D3DVS_GETSWIZZLE(source));
         break;
     }
 }
@@ -102,116 +118,296 @@ static void DestinationRegisterCheopsFromD3DSI(struct CheopsMicrocode* microcode
 
 size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8])
 {
+    size_t index = 0;
     size_t count = 0;
+    uint8_t MLU_TEMP = 63;
     uint8_t RLU_TEMP = 7;
     uint8_t RLU_WRITEMASK_ALL = 0b1111;
-    struct CheopsMicrocode microcodes[4] = {};
+    struct CheopsMicrocode NOP = {};
+    struct CheopsMicrocode EMPTY = {};
+    struct CheopsMicrocode microcodes[4];
+    DefaultCheops(&NOP);
+    memset(&EMPTY, 0xFF, sizeof(EMPTY));
+    microcodes[0] = EMPTY;
+    microcodes[1] = EMPTY;
+    microcodes[2] = EMPTY;
+    microcodes[3] = EMPTY;
 
     switch (D3DSI_GETOPCODE(d3dsi[0]))
     {
     case D3DSIO_MOV:
-        DefaultCheops(&microcodes[0]);
+        microcodes[0] = NOP;
         DestinationRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[1]);
         SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
         count = 1;
         break;
     case D3DSIO_ADD:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
-        microcodes[1].aia = CHEOPS_CALU_AA_A;
-        microcodes[1].alu = CHEOPS_CALU_ADDA;
-        count = 2;
+        // [2] ADD r0, r0, r0
+        // [2] ADD r0, r0, v0
+        // [1] ADD r0, r0, c0
+        // [2] ADD r0, v0, v0
+        // [1] ADD r0, v0, c0
+        // [2] ADD r0, c0, c0 // 1 instruction when context read address is the same
+#if _OPTIMIZE
+        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DVS_NOSWIZZLE || D3DVS_GETSWIZZLE(d3dsi[3]) != D3DVS_NOSWIZZLE)
+        {
+            // Fallback
+        }
+        else if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST && D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST && D3DSI_GETREGNUM(d3dsi[2]) != D3DSI_GETREGNUM(d3dsi[3]))
+        {
+            // Fallback
+        }
+        else if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST || D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST)
+        {
+            microcodes[0] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[1]);
+            if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST)
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
+                microcodes[0].ais |= D3DVS_GETSRCMODIFIER(d3dsi[2]) == D3DSPSM_NEG ? 1 : 0;
+                microcodes[0].ca = D3DSI_GETREGNUM(d3dsi[2]);
+            }
+            else
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+                microcodes[0].ais |= D3DVS_GETSRCMODIFIER(d3dsi[3]) == D3DSPSM_NEG ? 1 : 0;
+                microcodes[0].ca = D3DSI_GETREGNUM(d3dsi[3]);
+            }
+            microcodes[0].aia = CHEOPS_CALU_AA_C;
+            microcodes[0].alu = CHEOPS_CALU_ADDA;
+            count = 1;
+            break;
+        }
+#endif
+        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE && D3DVS_GETSWIZZLE(d3dsi[3]) != D3DSP_NOSWIZZLE)
+        {
+            microcodes[0] = NOP;
+            microcodes[1] = NOP;
+            microcodes[2] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[2], d3dsi[1]);
+            SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+            SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
+            microcodes[0].rwa = RLU_TEMP;
+            microcodes[0].rwm = RLU_WRITEMASK_ALL;
+            microcodes[2].aia = CHEOPS_CALU_AA_A;
+            microcodes[2].alu = CHEOPS_CALU_ADDA;
+            microcodes[2].rra = RLU_TEMP;
+            count = 3;
+        }
+        else
+        {
+            microcodes[0] = NOP;
+            microcodes[1] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
+            if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE)
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
+            }
+            else
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[2]);
+            }
+            microcodes[1].aia = CHEOPS_CALU_AA_A;
+            microcodes[1].alu = CHEOPS_CALU_ADDA;
+            count = 2;
+        }
         break;
     case D3DSIO_MAD:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DefaultCheops(&microcodes[2]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[2], d3dsi[1]);
-        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE)
-        {
-            SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-            SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
-        }
-        else
-        {
-            SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
-            SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[2]);
-        }
-        SourceRegisterCheopsFromD3DSI(&microcodes[2], d3dsi[4]);
-        microcodes[0].rwa = RLU_TEMP;
-        microcodes[0].rwm = RLU_WRITEMASK_ALL;
-        microcodes[1].mlu = CHEOPS_CMLU_MULT;
-        microcodes[1].rra = RLU_TEMP;
-        microcodes[2].aia = CHEOPS_CALU_AA_A;
-        microcodes[2].alu = CHEOPS_CALU_ADDA;
-        count = 3;
-        break;
+        // [2] MAD r0, r0, r0, r0
+        // [2] MAD r0, r0, r0, v0
+        // [2] MAD r0, r0, r0, c0 // 1 instruction when RLU read address is the same
+        // [2] MAD r0, r0, v0, r0
+        // [2] MAD r0, r0, v0, v0
+        // [1] MAD r0, r0, v0, c0
+        // [2] MAD r0, r0, c0, r0
+        // [2] MAD r0, r0, c0, v0
+        // [2] MAD r0, r0, c0, c0 // 1 instruction when context read address is the same
+        // [3] MAD r0, v0, v0, r0
+        // [3] MAD r0, v0, v0, v0
+        // [2] MAD r0, v0, v0, c0
+        // [2] MAD r0, v0, c0, r0
+        // [2] MAD r0, v0, c0, v0
+        // [2] MAD r0, v0, c0, c0 // 1 instruction when context read address is the same
+        // [3] MAD r0, c0, c0, r0
+        // [3] MAD r0, c0, c0, v0
+        // [3] MAD r0, c0, c0, c0 // 2 instructions when context read address is the same
     case D3DSIO_MUL:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
-        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE)
+    case D3DSIO_DP3:
+    case D3DSIO_DP4:
+        // [2] MUL r0, r0, r0 // 1 instruction when RLU read address is the same
+        // [1] MUL r0, r0, v0
+        // [1] MUL r0, r0, c0
+        // [2] MUL r0, v0, v0
+        // [1] MUL r0, v0, c0
+        // [2] MUL r0, c0, c0
+#if _OPTIMIZE
+        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DVS_NOSWIZZLE || D3DVS_GETSWIZZLE(d3dsi[3]) != D3DVS_NOSWIZZLE)
         {
-            SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-            SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
+            // Fallback
+        }
+        else if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_TEMP && D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_TEMP && D3DSI_GETREGNUM(d3dsi[2]) != D3DSI_GETREGNUM(d3dsi[3]))
+        {
+            // Fallback
+        }
+        else if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_INPUT && D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_INPUT)
+        {
+            // Fallback
+        }
+        else if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST && D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST)
+        {
+            // Fallback
+        }
+        else if ((D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_TEMP || D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_INPUT || D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST) &&
+                 (D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_TEMP || D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_INPUT || D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST))
+        {
+            microcodes[0] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[1]);
+            if ((D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_TEMP || D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_INPUT) && D3DSI_GETREGTYPE(d3dsi[3]) != D3DSPR_INPUT)
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+                if (D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST)
+                {
+                    microcodes[0].mib = CHEOPS_CMLU_MB_C;
+                    microcodes[0].ca = D3DSI_GETREGNUM(d3dsi[3]);
+                }
+                else
+                {
+                    microcodes[0].mib = CHEOPS_CMLU_MB_R;
+                    microcodes[0].rra = D3DSI_GETREGNUM(d3dsi[3]);
+                }
+            }
+            else
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
+                if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST)
+                {
+                    microcodes[0].mib = CHEOPS_CMLU_MB_C;
+                    microcodes[0].ca = D3DSI_GETREGNUM(d3dsi[2]);
+                }
+                else
+                {
+                    microcodes[0].mib = CHEOPS_CMLU_MB_R;
+                    microcodes[0].rra = D3DSI_GETREGNUM(d3dsi[2]);
+                }
+            }
+            microcodes[0].ais = (D3DVS_GETSRCMODIFIER(d3dsi[2]) + D3DVS_GETSRCMODIFIER(d3dsi[3])) == D3DSPSM_NEG ? 2 : 0;
+            microcodes[0].mlu = CHEOPS_CMLU_MULT;
+            switch (D3DSI_GETOPCODE(d3dsi[0]))
+            {
+            case D3DSIO_MAD:    goto mad;                               break;
+            case D3DSIO_DP3:    microcodes[0].alu = CHEOPS_CALU_SUM3B;  break;
+            case D3DSIO_DP4:    microcodes[0].alu = CHEOPS_CALU_SUM4B;  break;
+            }
+            count = 1;
+            break;
+        }
+#endif
+        if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE && D3DVS_GETSWIZZLE(d3dsi[3]) != D3DSP_NOSWIZZLE)
+        {
+            if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST && D3DSI_GETREGTYPE(d3dsi[3]) == D3DSPR_CONST)
+            {
+                PrintfCheops("Unimplemented\n");
+                return 0;
+            }
+            microcodes[0] = NOP;
+            microcodes[1] = NOP;
+            microcodes[2] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[2], d3dsi[1]);
+            if (D3DSI_GETREGTYPE(d3dsi[2]) == D3DSPR_CONST)
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
+            }
+            else
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[2]);
+            }
+            microcodes[0].rwa = RLU_TEMP;
+            microcodes[0].rwm = RLU_WRITEMASK_ALL;
+            microcodes[1].ca = MLU_TEMP;
+            microcodes[1].ce = TRUE;
+            microcodes[2].mlu = CHEOPS_CMLU_MULT;
+            microcodes[2].mib = CHEOPS_CMLU_MB_C;
+            microcodes[2].ca = MLU_TEMP;
+            microcodes[2].rra = RLU_TEMP;
+            switch (D3DSI_GETOPCODE(d3dsi[0]))
+            {
+            case D3DSIO_DP3:    microcodes[2].alu = CHEOPS_CALU_SUM3B;  break;
+            case D3DSIO_DP4:    microcodes[2].alu = CHEOPS_CALU_SUM4B;  break;
+            }
+            count = 3;
         }
         else
         {
-            SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
-            SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[2]);
+            microcodes[0] = NOP;
+            microcodes[1] = NOP;
+            DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
+            if (D3DVS_GETSWIZZLE(d3dsi[2]) != D3DSP_NOSWIZZLE)
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
+            }
+            else
+            {
+                SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[3]);
+                SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[2]);
+            }
+            microcodes[0].rwa = RLU_TEMP;
+            microcodes[0].rwm = RLU_WRITEMASK_ALL;
+            microcodes[1].mlu = CHEOPS_CMLU_MULT;
+            switch (D3DSI_GETOPCODE(d3dsi[0]))
+            {
+            case D3DSIO_DP3:    microcodes[1].alu = CHEOPS_CALU_SUM3B;  break;
+            case D3DSIO_DP4:    microcodes[1].alu = CHEOPS_CALU_SUM4B;  break;
+            }
+            microcodes[1].rra = RLU_TEMP;
+            count = 2;
         }
-        microcodes[0].rwa = RLU_TEMP;
-        microcodes[0].rwm = RLU_WRITEMASK_ALL;
-        microcodes[0].oa = CHEOPS_COUT_TVW_NOP;
-        microcodes[1].mlu = CHEOPS_CMLU_MULT;
-        microcodes[1].rra = RLU_TEMP;
-        count = 2;
+        if (D3DSI_GETOPCODE(d3dsi[0]) == D3DSIO_MAD)
+        {
+            index = count - 1;
+mad:
+            if (D3DSI_GETREGTYPE(d3dsi[4]) == D3DSPR_CONST &&
+                ((D3DSI_GETREGTYPE(d3dsi[2]) != D3DSPR_CONST || D3DSI_GETREGNUM(d3dsi[2]) == D3DSI_GETREGNUM(d3dsi[4])) &&
+                 (D3DSI_GETREGTYPE(d3dsi[3]) != D3DSPR_CONST || D3DSI_GETREGNUM(d3dsi[3]) == D3DSI_GETREGNUM(d3dsi[4]))))
+            {
+                microcodes[index].aia = CHEOPS_CALU_AA_C;
+                microcodes[index].ais |= D3DVS_GETSRCMODIFIER(d3dsi[4]) == D3DSPSM_NEG ? 1 : 0;
+                microcodes[index].alu = CHEOPS_CALU_ADDA;
+                microcodes[index].ca = D3DSI_GETREGNUM(d3dsi[4]);
+                count = index + 1;
+            }
+            else
+            {
+                microcodes[index + 1] = NOP;
+                SourceRegisterCheopsFromD3DSI(&microcodes[index + 1], d3dsi[4]);
+                microcodes[index + 1].aia = CHEOPS_CALU_AA_A;
+                microcodes[index + 1].ais |= D3DVS_GETSRCMODIFIER(d3dsi[4]) == D3DSPSM_NEG ? 1 : 0;
+                microcodes[index + 1].alu = CHEOPS_CALU_ADDA;
+                microcodes[index + 1].rwa = microcodes[index + 0].rwa;
+                microcodes[index + 1].rwm = microcodes[index + 0].rwm;
+                microcodes[index + 0].rwa = 0;
+                microcodes[index + 0].rwm = 0;
+                count = index + 2;
+            }
+        }
         break;
     case D3DSIO_RCP:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-        microcodes[0].ilu = CHEOPS_CILU_INV;
-        microcodes[1].mib = CHEOPS_CMLU_MB_I;
-        microcodes[1].mlu = CHEOPS_CMLU_PASB;
-        count = 2;
-        break;
     case D3DSIO_RSQ:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
+        microcodes[0] = NOP;
+        microcodes[1] = NOP;
         DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
         SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-        microcodes[0].ilu = CHEOPS_CILU_ISQ;
+        switch (D3DSI_GETOPCODE(d3dsi[0]))
+        {
+        case D3DSIO_RCP:    microcodes[0].ilu = CHEOPS_CILU_INV;    break;
+        case D3DSIO_RSQ:    microcodes[0].ilu = CHEOPS_CILU_ISQ;    break;
+        }
         microcodes[1].mib = CHEOPS_CMLU_MB_I;
         microcodes[1].mlu = CHEOPS_CMLU_PASB;
-        count = 2;
-        break;
-    case D3DSIO_DP3:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
-        microcodes[0].rwa = RLU_TEMP;
-        microcodes[0].rwm = RLU_WRITEMASK_ALL;
-        microcodes[1].alu = CHEOPS_CALU_SUM3B;
-        microcodes[1].rra = RLU_TEMP;
-        count = 2;
-        break;
-    case D3DSIO_DP4:
-        DefaultCheops(&microcodes[0]);
-        DefaultCheops(&microcodes[1]);
-        DestinationRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[1]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[0], d3dsi[2]);
-        SourceRegisterCheopsFromD3DSI(&microcodes[1], d3dsi[3]);
-        microcodes[0].rwa = RLU_TEMP;
-        microcodes[0].rwm = RLU_WRITEMASK_ALL;
-        microcodes[1].alu = CHEOPS_CALU_SUM4B;
-        microcodes[1].rra = RLU_TEMP;
         count = 2;
         break;
     case D3DSIO_MIN:
@@ -228,11 +424,19 @@ size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8])
     case D3DSIO_M3x4:
     case D3DSIO_M3x3:
     case D3DSIO_M3x2:
-        break;
+        PrintfCheops("Unimplemented\n");
+        return 0;
     }
 
-    memcpy(cheops, microcodes, sizeof(uint64_t) * count);
-    return count;
+    size_t reduced = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (memcmp(microcodes + i, &EMPTY, sizeof(EMPTY)) == 0)
+            continue;
+        PackCheops(cheops + reduced, microcodes + i);
+        reduced++;
+    }
+    return reduced;
 }
 
 static void PrintMLUInputA(char* text, size_t size, struct CheopsMicrocode microcode)
@@ -274,7 +478,19 @@ static void PrintALUSwizzle(char* text, size_t size, struct CheopsMicrocode micr
 
 static void PrintALUOutput(char* text, size_t size, struct CheopsMicrocode microcode)
 {
-    if (microcode.rwm != 0b0000)
+    if (microcode.ilu != CHEOPS_CILU_NOP)
+    {
+        _PRINTF("%s", "ilu");
+        if (microcode.rwm != 0b0000)
+        {
+            PrintfCheops("%s is found\n", "RLU ADDRESS");
+        }
+        if (microcode.oa < CHEOPS_COUT_TVW_NOP)
+        {
+            PrintfCheops("%s is found\n", "OUTPUT BUFFER ADDRESS");
+        }
+    }
+    else if (microcode.rwm != 0b0000)
     {
         _PRINTF("%s%d", "r", microcode.rwa);
         if (microcode.rwm != 0b1111)
@@ -298,6 +514,10 @@ static void PrintALUOutput(char* text, size_t size, struct CheopsMicrocode micro
         };
         _PRINTF("%s", address[microcode.oa]);
     }
+    else if (microcode.ce == TRUE)
+    {
+        _PRINTF("%s%d", "c", microcode.ca);
+    }
     else
     {
         _PRINTF("%s", "alu");
@@ -307,7 +527,7 @@ static void PrintALUOutput(char* text, size_t size, struct CheopsMicrocode micro
 void DisasembleCheops(char* text, size_t size, uint64_t cheops)
 {
     struct CheopsMicrocode microcode;
-    memcpy(&microcode, &cheops, sizeof(uint64_t));
+    PackCheops(&microcode, &cheops);
 
     // Reset
     text[0] = 0;
@@ -374,9 +594,9 @@ void DisasembleCheops(char* text, size_t size, uint64_t cheops)
         case CHEOPS_CMLU_MULB:
             switch (microcode.alu)
             {
+            default:                _PRINTF("%s", "mul");   break;
             case CHEOPS_CALU_SUM3B: _PRINTF("%s", "dp3");   break;
             case CHEOPS_CALU_SUM4B: _PRINTF("%s", "dp4");   break;
-            default:                _PRINTF("%s", "mul");   break;
             }
             _PRINTF("%s", " ");
             PrintALUOutput(text, size, microcode);
@@ -392,9 +612,22 @@ void DisasembleCheops(char* text, size_t size, uint64_t cheops)
         case CHEOPS_CMLU_PASB:
             switch (microcode.alu)
             {
-            case CHEOPS_CALU_SUM3B:
-            case CHEOPS_CALU_SUM4B: _PRINTF("%s", "sum");   break;
             default:                _PRINTF("%s", "mov");   break;
+            case CHEOPS_CALU_SUM3B: _PRINTF("%s", "sum3");  break;
+            case CHEOPS_CALU_SUM4B: _PRINTF("%s", "sum4");  break;
+            case CHEOPS_CALU_SMRB0:
+            case CHEOPS_CALU_SMRB1:
+            case CHEOPS_CALU_SMRB2:
+            case CHEOPS_CALU_SMRB3:
+            case CHEOPS_CALU_PASB:
+                switch (microcode.ilu)
+                {
+                default:                _PRINTF("%s", "mov");   break;
+                case CHEOPS_CILU_INV:   _PRINTF("%s", "rcp");   break;
+                case CHEOPS_CILU_ISQ:   _PRINTF("%s", "rsq");   break;
+                case CHEOPS_CILU_CINV:  _PRINTF("%s", "rcp");   break;
+                }
+                break;
             }
             _PRINTF("%s", " ");
             PrintALUOutput(text, size, microcode);

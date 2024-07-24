@@ -9,26 +9,27 @@
 extern "C" {
 #endif
 
+extern int (*PrintfCheops)(char const* format, ...);
 size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8]);
 void DisasembleCheops(char* text, size_t size, uint64_t cheops);
 
 struct CheopsMicrocode
 {
-    uint32_t oa:6;  // OUTPUT BUFFER WRITE ADDRESS
-    uint32_t rra:3; // RLU READ ADDRESS
-    uint32_t rwm:4; // RLU WRITE MASK
-    uint32_t rwa:3; // RLU WRITE ADDRESS
-    uint32_t ilu:2; // ILU OPERATION
-    uint32_t alu:4; // ALU OPERATION
-    uint32_t ais:2; // ALU SIGN CONTROL
-    uint32_t aia:1; // ALU INPUT A MUX
-    uint32_t mlu:3; // MLU OPERATION
-    uint32_t mib:2; // MLU INPUT B MUX
-    uint32_t mia:2; // MLU INPUT A MUX
-    uint32_t va:3;  // INPUT BUFFER READ ADDRESS
-    uint32_t ce:1;  // CONTEXT MEMORY READ/WRITE
-    uint32_t ca:6;  // CONTEXT MEMORY ADDRESS
-    uint32_t mr:2;  // MLU INPUT VECTOR ROTATE
+    uint32_t  oa:6; // 0:00 OUTPUT BUFFER WRITE ADDRESS
+    uint32_t rra:3; // 0:06 RLU READ ADDRESS
+    uint32_t rwm:4; // 0:09 RLU WRITE MASK
+    uint32_t rwa:3; // 0:13 RLU WRITE ADDRESS
+    uint32_t ilu:2; // 0:16 ILU OPERATION
+    uint32_t alu:4; // 0:18 ALU OPERATION
+    uint32_t ais:2; // 0:22 ALU SIGN CONTROL
+    uint32_t aia:1; // 0:24 ALU INPUT A MUX
+    uint32_t mlu:3; // 0:25 MLU OPERATION
+    uint32_t mib:2; // 0:28 MLU INPUT B MUX
+    uint32_t mia:2; // 0:30 MLU INPUT A MUX
+    uint32_t  va:3; // 1:32 INPUT BUFFER READ ADDRESS
+    uint32_t  ce:1; // 1:35 CONTEXT MEMORY READ/WRITE
+    uint32_t  ca:6; // 1:36 CONTEXT MEMORY ADDRESS
+    uint32_t  mr:2; // 1:42 MLU INPUT VECTOR ROTATE
 };
 
 // MLU OPERATION

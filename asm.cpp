@@ -10,7 +10,12 @@
 //==============================================================================
 #define D3DSP_REGTYPE(reg) (((reg << D3DSP_REGTYPE_SHIFT) & D3DSP_REGTYPE_MASK) | ((reg << D3DSP_REGTYPE_SHIFT2) & D3DSP_REGTYPE_MASK2))
 //------------------------------------------------------------------------------
-static uint32_t Register(char const* text, bool source, int shift, bool saturate)
+// |Destination|P|Type |Shift  |Modifie|WriteMa|Min| |Typ|Number               |
+// |           |1| | | | | | | | | | | | | | | | | |?| | | | | | | | | | | | | |
+// |Source     |P|Type |Modifie|Swizzle        |Min|A|Typ|Number               |
+// |           |1| | | | | | | | | | | | | | | | | | | | | | | | | | | | | | | |
+//------------------------------------------------------------------------------
+static uint32_t Register(char const* text, bool source, int shift, bool sat, bool pp)
 {
     if (text == nullptr || text[0] == ';' || text[0] == '/')
         return 0;
@@ -35,7 +40,7 @@ static uint32_t Register(char const* text, bool source, int shift, bool saturate
         {
             underline = true;
         }
-        else if (c == '-')
+        else if (c == '-' || c == '|' || c == '!')
         {
             mod = mod | (c << modShift);
             modShift += 8;
@@ -84,27 +89,58 @@ static uint32_t Register(char const* text, bool source, int shift, bool saturate
     switch (type)
     {
 #if (DIRECT3D_VERSION >= 0x0900)
-    case "r"_CC:    token |= D3DSP_REGTYPE(D3DSPR_TEMP);                    break;
-    case "v"_CC:    token |= D3DSP_REGTYPE(D3DSPR_INPUT);                   break;
-    case "c"_CC:    token |= D3DSP_REGTYPE(D3DSPR_CONST);                   break;
-    case "a"_CC:    token |= D3DSP_REGTYPE(D3DSPR_ADDR);                    break;
-    case "t"_CC:    token |= D3DSP_REGTYPE(D3DSPR_TEXTURE);                 break;
-    case "opos"_CC: token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     index = 0;  break;
-    case "ofog"_CC: token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     index = 1;  break;
-    case "opts"_CC: token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     index = 2;  break;
-    case "od"_CC:   token |= D3DSP_REGTYPE(D3DSPR_ATTROUT);                 break;
-    case "ot"_CC:   token |= D3DSP_REGTYPE(D3DSPR_TEXCRDOUT);               break;
+    case "r"_CC:        token |= D3DSP_REGTYPE(D3DSPR_TEMP);        break;
+    case "v"_CC:        token |= D3DSP_REGTYPE(D3DSPR_INPUT);       break;
+    case "c"_CC:
+        switch (index / 2048)
+        {
+        case 0:         token |= D3DSP_REGTYPE(D3DSPR_CONST);       break;
+        case 1:         token |= D3DSP_REGTYPE(D3DSPR_CONST2);      break;
+        case 2:         token |= D3DSP_REGTYPE(D3DSPR_CONST3);      break;
+        case 3:         token |= D3DSP_REGTYPE(D3DSPR_CONST4);      break;
+        }
+        break;
+    case "a"_CC:        token |= D3DSP_REGTYPE(D3DSPR_ADDR);        break;
+    case "t"_CC:        token |= D3DSP_REGTYPE(D3DSPR_TEXTURE);     break;
+    case "opos"_CC:     token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     break;
+    case "ofog"_CC:     token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     break;
+    case "opts"_CC:     token |= D3DSP_REGTYPE(D3DSPR_RASTOUT);     break;
+    case "od"_CC:       token |= D3DSP_REGTYPE(D3DSPR_ATTROUT);     break;
+    case "ot"_CC:       token |= D3DSP_REGTYPE(D3DSPR_TEXCRDOUT);   break;
+    case "o"_CC:        token |= D3DSP_REGTYPE(D3DSPR_OUTPUT);      break;
+    case "i"_CC:        token |= D3DSP_REGTYPE(D3DSPR_CONSTINT);    break;
+    case "oc"_CC:       token |= D3DSP_REGTYPE(D3DSPR_COLOROUT);    break;
+    case "odepth"_CC:   token |= D3DSP_REGTYPE(D3DSPR_DEPTHOUT);    break;
+    case "s"_CC:        token |= D3DSP_REGTYPE(D3DSPR_SAMPLER);     break;
+    case "b"_CC:        token |= D3DSP_REGTYPE(D3DSPR_CONSTBOOL);   break;
+    case "al"_CC:       token |= D3DSP_REGTYPE(D3DSPR_LOOP);        break;
+    case "h"_CC:        token |= D3DSP_REGTYPE(D3DSPR_TEMPFLOAT16); break;
+    case "vface"_CC:    token |= D3DSP_REGTYPE(D3DSPR_MISCTYPE);    break;
+    case "vpos"_CC:     token |= D3DSP_REGTYPE(D3DSPR_MISCTYPE);    break;
+    case "l"_CC:        token |= D3DSP_REGTYPE(D3DSPR_LABEL);       break;
+    case "p"_CC:        token |= D3DSP_REGTYPE(D3DSPR_PREDICATE);   break;
 #else
-    case "r"_CC:    token |= D3DSPR_TEMP;                   break;
-    case "v"_CC:    token |= D3DSPR_INPUT;                  break;
-    case "c"_CC:    token |= D3DSPR_CONST;                  break;
-    case "a"_CC:    token |= D3DSPR_ADDR;                   break;
-    case "t"_CC:    token |= D3DSPR_TEXTURE;                break;
-    case "opos"_CC: token |= D3DSPR_RASTOUT;    index = 0;  break;
-    case "ofog"_CC: token |= D3DSPR_RASTOUT;    index = 1;  break;
-    case "opts"_CC: token |= D3DSPR_RASTOUT;    index = 2;  break;
-    case "od"_CC:   token |= D3DSPR_ATTROUT;                break;
-    case "ot"_CC:   token |= D3DSPR_TEXCRDOUT;              break;
+    case "r"_CC:        token |= D3DSPR_TEMP;       break;
+    case "v"_CC:        token |= D3DSPR_INPUT;      break;
+    case "c"_CC:        token |= D3DSPR_CONST;      break;
+    case "a"_CC:        token |= D3DSPR_ADDR;       break;
+    case "t"_CC:        token |= D3DSPR_TEXTURE;    break;
+    case "opos"_CC:     token |= D3DSPR_RASTOUT;    break;
+    case "ofog"_CC:     token |= D3DSPR_RASTOUT;    break;
+    case "opts"_CC:     token |= D3DSPR_RASTOUT;    break;
+    case "od"_CC:       token |= D3DSPR_ATTROUT;    break;
+    case "ot"_CC:       token |= D3DSPR_TEXCRDOUT;  break;
+#endif
+    }
+    switch (type)
+    {
+    case "opos"_CC:     index = D3DSRO_POSITION;    break;
+    case "ofog"_CC:     index = D3DSRO_FOG;         break;
+    case "opts"_CC:     index = D3DSRO_POINT_SIZE;  break;
+#if (DIRECT3D_VERSION >= 0x0900)
+    case "c"_CC:        index %= 2048;              break;
+    case "vface"_CC:    index = D3DSMO_FACE;        break;
+    case "vpos"_CC:     index = D3DSMO_POSITION;    break;
 #endif
     }
     token |= index;
@@ -124,15 +160,26 @@ static uint32_t Register(char const* text, bool source, int shift, bool saturate
         case "db"_CC:   token |= D3DSPSM_DZ;        break;
         case "dw"_CC:
         case "da"_CC:   token |= D3DSPSM_DW;        break;
+#if (DIRECT3D_VERSION >= 0x0900)
+        case "||"_CC:   token |= D3DSPSM_ABS;       break;
+        case "-||"_CC:  token |= D3DSPSM_ABSNEG;    break;
+        case "!"_CC:    token |= D3DSPSM_NOT;       break;
+#endif
         }
     }
     else
     {
         token |= (shift << D3DSP_DSTSHIFT_SHIFT);
-        if (saturate)
+        if (sat)
         {
             token |= D3DSPDM_SATURATE;
         }
+#if (DIRECT3D_VERSION >= 0x0900)
+        if (pp)
+        {
+            token |= D3DSPDM_PARTIALPRECISION;
+        }
+#endif
     }
     if (mask)
     {
@@ -194,8 +241,12 @@ size_t AssembleD3DSI(uint32_t tokens[8], uint32_t version, char const* text)
     }
 
     // Saturate
-    bool saturate = false;
-    if (char* suffix = strstr(opcode, "_sat")) { suffix[0] = 0; saturate = true; }
+    bool sat = false;
+    bool pp = false;
+    if (char* suffix = strstr(opcode, "_sat")) { suffix[0] = 0; sat = true; }
+#if (DIRECT3D_VERSION >= 0x0900)
+    if (char* suffix = strstr(opcode, "_pp")) { suffix[0] = 0; pp = true; }
+#endif
 
     // Shift
     int shift = 0;
@@ -211,20 +262,24 @@ size_t AssembleD3DSI(uint32_t tokens[8], uint32_t version, char const* text)
     uint32_t dcl = UINT32_MAX;
     switch (operator ""_CC(opcode, strlen(opcode)))
     {
-    case "vs_1_0"_CC:
-    case "vs.1.0"_CC:           tokens[index++] = D3DVS_VERSION(1, 0);  return index;
-    case "vs_1_1"_CC:
-    case "vs.1.1"_CC:           tokens[index++] = D3DVS_VERSION(1, 1);  return index;
-    case "ps_1_0"_CC:
-    case "ps.1.0"_CC:           tokens[index++] = D3DPS_VERSION(1, 0);  return index;
-    case "ps_1_1"_CC:
-    case "ps.1.1"_CC:           tokens[index++] = D3DPS_VERSION(1, 1);  return index;
-    case "ps_1_2"_CC:
-    case "ps.1.2"_CC:           tokens[index++] = D3DPS_VERSION(1, 2);  return index;
-    case "ps_1_3"_CC:
-    case "ps.1.3"_CC:           tokens[index++] = D3DPS_VERSION(1, 3);  return index;
-    case "ps_1_4"_CC:
-    case "ps.1.4"_CC:           tokens[index++] = D3DPS_VERSION(1, 4);  return index;
+    case "vs_1_0"_CC:   case "vs.1.0"_CC:   tokens[index++] = D3DVS_VERSION(1, 0);  return index;
+    case "vs_1_1"_CC:   case "vs.1.1"_CC:   tokens[index++] = D3DVS_VERSION(1, 1);  return index;
+#if (DIRECT3D_VERSION >= 0x0900)
+    case "vs_2_0"_CC:   case "vs.2.0"_CC:   tokens[index++] = D3DVS_VERSION(2, 0);  return index;
+    case "vs_2_a"_CC:   case "vs.2.a"_CC:   tokens[index++] = D3DVS_VERSION(2, 1);  return index;
+    case "vs_3_0"_CC:   case "vs.3.0"_CC:   tokens[index++] = D3DVS_VERSION(3, 0);  return index;
+#endif
+    case "ps_1_0"_CC:   case "ps.1.0"_CC:   tokens[index++] = D3DPS_VERSION(1, 0);  return index;
+    case "ps_1_1"_CC:   case "ps.1.1"_CC:   tokens[index++] = D3DPS_VERSION(1, 1);  return index;
+    case "ps_1_2"_CC:   case "ps.1.2"_CC:   tokens[index++] = D3DPS_VERSION(1, 2);  return index;
+    case "ps_1_3"_CC:   case "ps.1.3"_CC:   tokens[index++] = D3DPS_VERSION(1, 3);  return index;
+    case "ps_1_4"_CC:   case "ps.1.4"_CC:   tokens[index++] = D3DPS_VERSION(1, 4);  return index;
+#if (DIRECT3D_VERSION >= 0x0900)
+    case "ps_2_0"_CC:   case "ps.2.0"_CC:   tokens[index++] = D3DPS_VERSION(2, 0);  return index;
+    case "ps_2_a"_CC:   case "ps.2.a"_CC:   tokens[index++] = D3DPS_VERSION(2, 1);  return index;
+    case "ps_2_b"_CC:   case "ps.2.b"_CC:   tokens[index++] = D3DPS_VERSION(2, 2);  return index;
+    case "ps_3_0"_CC:   case "ps.3.0"_CC:   tokens[index++] = D3DPS_VERSION(3, 0);  return index;
+#endif
     case "nop"_CC:              token = D3DSIO_NOP;             break;
     case "mov"_CC:              token = D3DSIO_MOV;             break;
     case "add"_CC:              token = D3DSIO_ADD;             break;
@@ -318,7 +373,7 @@ size_t AssembleD3DSI(uint32_t tokens[8], uint32_t version, char const* text)
     case "texdepth"_CC:         token = D3DSIO_TEXDEPTH;        break;
     case "cmp"_CC:              token = D3DSIO_CMP;             break;
     case "bem"_CC:              token = D3DSIO_BEM;             break;
-#if (DIRECT3D_VERSION >= 0x0900 )
+#if (DIRECT3D_VERSION >= 0x0900)
     case "dp2add"_CC:           token = D3DSIO_DP2ADD;          break;
     case "dsx"_CC:              token = D3DSIO_DSX;             break;
     case "dsy"_CC:              token = D3DSIO_DSY;             break;
@@ -343,21 +398,40 @@ size_t AssembleD3DSI(uint32_t tokens[8], uint32_t version, char const* text)
     }
 
     // Constant
-    if (token == D3DSIO_DEF)
+    switch (token)
     {
-        tokens[index++] = Register(dst, false, 0, false);
+    case D3DSIO_DEF:
+        tokens[index++] = Register(dst, false, 0, false, false);
         for (size_t i = 0; i < 4; ++i)
         {
-            float value = src[i] ? strtof(src[i], NULL) : 0.0f;
+            float value = strtof(src[i] ? src[i] : "", NULL);
             memcpy(&tokens[index++], &value, sizeof(float));
         }
         return index;
+#if (DIRECT3D_VERSION >= 0x0900)
+    case D3DSIO_DEFB:
+        tokens[index++] = Register(dst, false, 0, false, false);
+        for (size_t i = 0; i < 4; ++i)
+        {
+            int value = strcmp(src[i] ? src[i] : "false", "true") ? 0 : 1;
+            memcpy(&tokens[index++], &value, sizeof(int));
+        }
+        return index;
+    case D3DSIO_DEFI:
+        tokens[index++] = Register(dst, false, 0, false, false);
+        for (size_t i = 0; i < 4; ++i)
+        {
+            long value = strtol(src[i] ? src[i] : "", NULL, 10);
+            memcpy(&tokens[index++], &value, sizeof(int));
+        }
+        return index;
+#endif
     }
 
-    tokens[index++] = Register(dst, false, shift, saturate);
+    tokens[index++] = Register(dst, false, shift, sat, pp);
     for (size_t i = 0; i < 3; ++i)
     {
-        tokens[index] = Register(src[i], true, 0, false);
+        tokens[index] = Register(src[i], true, 0, false, false);
         if ((tokens[index] & 0x80000000) == 0)
             break;
         index++;

@@ -116,9 +116,8 @@ static void DestinationRegisterCheopsFromD3DSI(struct CheopsMicrocode* microcode
     }
 }
 
-size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8])
+size_t CompileCheopsFromD3DSI(uint64_t cheops[8], uint32_t const d3dsi[8])
 {
-    size_t index = 0;
     size_t count = 0;
     uint8_t MLU_TEMP = 63;
     uint8_t RLU_TEMP = 7;
@@ -368,7 +367,7 @@ size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8])
         }
         if (D3DSI_GETOPCODE(d3dsi[0]) == D3DSIO_MAD)
         {
-            index = count - 1;
+            size_t index = count - 1;
 mad:
             if (D3DSI_GETREGTYPE(d3dsi[4]) == D3DSPR_CONST &&
                 ((D3DSI_GETREGTYPE(d3dsi[2]) != D3DSPR_CONST || D3DSI_GETREGNUM(d3dsi[2]) == D3DSI_GETREGNUM(d3dsi[4])) &&
@@ -419,12 +418,42 @@ mad:
     case D3DSIO_LIT:
     case D3DSIO_DST:
     case D3DSIO_FRC:
+        PrintfCheops("Unimplemented\n");
+        return 0;
     case D3DSIO_M4x4:
     case D3DSIO_M4x3:
     case D3DSIO_M3x4:
     case D3DSIO_M3x3:
     case D3DSIO_M3x2:
-        PrintfCheops("Unimplemented\n");
+    {
+        uint32_t row = 0;
+        uint32_t local[4] = { d3dsi[0], d3dsi[1], d3dsi[2], d3dsi[3] };
+        switch (D3DSI_GETOPCODE(d3dsi[0]))
+        {
+        case D3DSIO_M4x4:
+        case D3DSIO_M3x4:   row = 4;    break;
+        case D3DSIO_M4x3:
+        case D3DSIO_M3x3:   row = 3;    break;
+        case D3DSIO_M3x2:   row = 2;    break;
+        }
+        switch (D3DSI_GETOPCODE(d3dsi[0]))
+        {
+        case D3DSIO_M4x4:
+        case D3DSIO_M4x3:   local[0] = (local[0] & ~D3DSI_OPCODE_MASK) | D3DSIO_DP4;    break;
+        case D3DSIO_M3x4:
+        case D3DSIO_M3x3:
+        case D3DSIO_M3x2:   local[0] = (local[0] & ~D3DSI_OPCODE_MASK) | D3DSIO_DP3;    break;
+        }
+        for (uint32_t i = 0; i < row; ++i)
+        {
+            local[1] = (local[1] & ~D3DSP_WRITEMASK_ALL) | (D3DSP_WRITEMASK_0 << i);
+            local[3] = (d3dsi[3] + i);
+            count += CompileCheopsFromD3DSI(cheops + count, local);
+        }
+        return count;
+    }
+    default:
+        PrintfCheops("Unknown\n");
         return 0;
     }
 

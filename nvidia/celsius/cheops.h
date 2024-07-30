@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 extern int (*PrintfCheops)(char const* format, ...);
-size_t CompileCheopsFromD3DSI(uint64_t cheops[4], uint32_t d3dsi[8]);
+size_t CompileCheopsFromD3DSI(uint64_t cheops[8], uint32_t const d3dsi[8]);
 void DisasembleCheops(char* text, size_t size, uint64_t cheops);
 
 struct CheopsMicrocode

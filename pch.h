@@ -67,7 +67,7 @@ typedef struct { uint64_t v; } LARGE_INTEGER;
 #endif
 
 #if __cplusplus
-constexpr uint64_t operator ""_CC(char const* text, size_t length)
+constexpr uint64_t operator ""_u64(char const* text, size_t length)
 {
     uint64_t value = 0;
     for (size_t i = 0; i < length; ++i)

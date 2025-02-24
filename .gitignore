@@ -1,0 +1,7 @@
+*.iml
+*.vcxproj.user
+*.xcscheme
+*.xcuserstate
+*.xcbkptlist
+xcschememanagement.plist
+IDEWorkspaceChecks.plist

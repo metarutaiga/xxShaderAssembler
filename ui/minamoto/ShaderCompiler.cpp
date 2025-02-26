@@ -137,7 +137,7 @@ static std::string text;
 static std::string vertexDisassembly;
 static std::string fragmentDisassembly;
 //==============================================================================
-static void Compile(int format)
+static void Compile(int format, bool blending)
 {
 #if defined(xxMACOS) || defined(xxIOS)
     NSError* error;
@@ -163,6 +163,9 @@ static void Compile(int format)
     if (desc.vertexFunction == nil || desc.fragmentFunction == nil)
         return;
     desc.colorAttachments[0].pixelFormat = MTLPixelFormat(format);
+    desc.colorAttachments[0].blendingEnabled = blending;
+    desc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    desc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
     [archive addRenderPipelineFunctionsWithDescriptor:desc
                                                 error:&error];
@@ -244,6 +247,7 @@ bool ShaderCompiler::Update(const UpdateData& updateData, bool& show)
         bool compile = false;
 #if defined(xxMACOS) || defined(xxIOS)
         static int format = MTLPixelFormatRGBA8Unorm;
+        static bool blending = false;
         if (ImGui::RadioButton("R8", format == MTLPixelFormatR8Unorm))
         {
             format = MTLPixelFormatR8Unorm;
@@ -279,8 +283,14 @@ bool ShaderCompiler::Update(const UpdateData& updateData, bool& show)
             format = MTLPixelFormatRGBA32Float;
             compile = true;
         }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Blending", &blending))
+        {
+            compile = true;
+        }
 #else
         static int format = 0;
+        static bool blending = false;
 #endif
 
         size.y = size.y - ImGui::GetCursorPosY() - (ImGui::GetTextLineHeight() + ImGui::GetStyle().FramePadding.y * 8.0f);
@@ -290,7 +300,7 @@ bool ShaderCompiler::Update(const UpdateData& updateData, bool& show)
         compile |= ImGui::InputTextMultiline("INPUT", text, ImVec2(size.x, size.y / 2.0f), ImGuiInputTextFlags_AllowTabInput);
         if (compile)
         {
-            Compile(format);
+            Compile(format, blending);
         }
 
         auto tabWindow = [&](float width, int flag)

@@ -187,7 +187,7 @@ ShaderDisassemblerAGX::Instruction ShaderDisassemblerAGX::DecodeG13X(void const*
         case 0b10110101: return { L ? 8 : 6, "stack_store" };   // TODO
         case 0b11000101: return { L ? 8 : 6, "device_store", "r41-40,15-10:0:49:0 r39-36,19-16:0:27:0 63-56,35-32,23-20" };   // TODO
         }
-        return { L ? 8 : 6, "???" };
+        return { 8, "???" };
     case 6:             // basic 16bit operation
         switch (code[0] & 0b1111110)
         {

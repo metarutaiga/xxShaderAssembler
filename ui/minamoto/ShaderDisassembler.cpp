@@ -80,8 +80,9 @@ static void Disassemble(ShaderDisassemblyData& data)
                     }
                     else
                     {
-                        size_t size = xxAllocSize(code);
-                        D3DDisassemble(code, size, 0, "", &text);
+                        size_t size = xxAllocSize(code) - 16;
+                        char const* binary = (char*)code + 16;
+                        D3DDisassemble(binary, size, 0, "", &text);
                     }
                     if (text)
                     {

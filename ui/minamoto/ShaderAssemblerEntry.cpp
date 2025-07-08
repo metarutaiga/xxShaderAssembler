@@ -44,20 +44,19 @@ moduleAPI void Message(const MessageData& messageData)
 //------------------------------------------------------------------------------
 moduleAPI bool Update(const UpdateData& updateData)
 {
-    static bool showAbout = false;
     static bool showShaderAssembler = false;
     static bool showShaderCompiler = false;
     static bool showShaderDisassembler = false;
 
     if (ImGui::BeginMainMenuBar())
     {
-        if (ImGui::BeginMenu(PLUGIN_NAME))
+        if (ImGui::BeginMenu("Experimental"))
         {
+            if (ImGui::GetCursorPos().y > ImGui::GetTextLineHeightWithSpacing())
+                ImGui::Separator();
             ImGui::MenuItem("Shader Assembler", nullptr, &showShaderAssembler);
             ImGui::MenuItem("Shader Compiler", nullptr, &showShaderCompiler);
             ImGui::MenuItem("Shader Disassembler", nullptr, &showShaderDisassembler);
-            ImGui::Separator();
-            ImGui::MenuItem("About " PLUGIN_NAME, nullptr, &showAbout);
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
